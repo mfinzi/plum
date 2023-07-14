@@ -115,6 +115,21 @@ class Resolver:
         # Use a double negation for slightly better performance.
         self.is_faithful = not any(not s.is_faithful for s in self.signatures)
 
+    def unregister(self, signature):
+        """Register a new signature.
+
+        Args:
+            signature (:class:`.signature.Signature`): Signature to add.
+        """
+        existing = [s == signature for s in self.signatures]
+        if any(existing):
+            self.signatures.pop(existing.index(True))
+        else:
+            raise AssertionError(
+                    f"The removed signature `{signature}` is not in {sum(existing)} "
+                    f"existing signatures. This should never happen."
+                )
+
     def __len__(self):
         return len(self.signatures)
 
@@ -130,7 +145,6 @@ class Resolver:
                 `target`.
         """
         if isinstance(target, tuple):
-
             def check(s):
                 # `target` are concrete arguments.
                 return s.match(target)

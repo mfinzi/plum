@@ -7,9 +7,20 @@ from .resolver import AmbiguousLookupError, NotFoundLookupError, Resolver
 from .signature import Signature, append_default_args, extract_signature
 from .type import resolve_type_hint
 from .util import repr_short
-
+import logging
 __all__ = ["Function"]
 
+#TODO: extent to handle conditions (will be necessary)
+class Disable:
+    def __init__(self, fn, signatures):
+        self.sigs = signatures
+        self.fn = fn
+        self._disabled = []
+    def __enter__(self):
+        self._disabled = self.fn.disable_multi(*self.sigs)
+    def __exit__(self, exc_type, exc_value, traceback):
+        for sig in self._disabled:
+            self.fn.dispatch_multi(sig)(sig.implementation)
 
 _promised_convert = None
 """function or None: This will be set to :func:`.parametric.convert`."""
@@ -170,7 +181,16 @@ class Function(metaclass=_FunctionMeta):
         self._resolve_pending_registrations()
         return self._resolver.signatures
 
-    def dispatch(self, method=None, precedence=0):
+    def disable_methods(self,*signatures):
+        """Disable methods of the given types.
+
+        Args:
+            list[tuple(type)]: list of type signatures to disable
+        """
+        return Disable(self,signatures)
+
+
+    def dispatch(self, method=None, cond=None, precedence=0):
         """Decorator to extend the function with another signature.
 
         Args:
@@ -180,9 +200,9 @@ class Function(metaclass=_FunctionMeta):
             function: Decorator.
         """
         if method is None:
-            return lambda m: self.dispatch(m, precedence=precedence)
+            return lambda m: self.dispatch(m, cond=cond, precedence=precedence)
 
-        self.register(method, precedence=precedence)
+        self.register(method, condition=cond, precedence=precedence)
         return self
 
     def dispatch_multi(self, *signatures):
@@ -210,10 +230,26 @@ class Function(metaclass=_FunctionMeta):
         def decorator(method):
             # The precedence will not be used, so we can safely set it to `None`.
             for signature in resolved_signatures:
-                self.register(method, signature=signature, precedence=None)
+                self.register(method, signature=signature, precedence=None, to_remove=False)
             return self
 
         return decorator
+
+    def disable_multi(self, *signatures):
+        resolved_signatures = []
+        for signature in signatures:
+            if isinstance(signature, Signature):
+                resolved_signatures.append(signature)
+            elif isinstance(signature, tuple):
+                resolved_signatures.append(Signature(*signature))
+            else:
+                raise ValueError(
+                    f"Signature `{signature}` must be a tuple or of type "
+                    f"`plum.signature.Signature`."
+                )
+        for signature in resolved_signatures:
+            self.register(self, signature=signature, precedence=None, to_remove=True)
+        return resolved_signatures
 
     def clear_cache(self, reregister=True):
         """Clear cache.
@@ -232,7 +268,7 @@ class Function(metaclass=_FunctionMeta):
             self._resolved = []
             self._resolver = Resolver()
 
-    def register(self, f, signature=None, precedence=0):
+    def register(self, f, signature=None, condition=None, precedence=0, to_remove=False):
         """Register a method.
 
         Either `signature` or `precedence` must be given.
@@ -243,21 +279,28 @@ class Function(metaclass=_FunctionMeta):
                 not given, it will be derived from `f`.
             precedence (int, optional): Precedence of the function. If `signature` is
                 given, then this argument will not be used. Defaults to `0`.
+            to_remove (bool, optional): Whether to remove the method.
         """
-        self._pending.append((f, signature, precedence))
+        self._pending.append((f, signature, condition, precedence, to_remove))
 
     def _resolve_pending_registrations(self):
         # Keep track of whether anything registered.
         registered = False
 
         # Perform any pending registrations.
-        for f, signature, precedence in self._pending:
+        for f, signature, condition, precedence, to_remove in self._pending:
             # Add to resolved registrations.
-            self._resolved.append((f, signature, precedence))
-
+            self._resolved.append((f, signature, condition, precedence, to_remove))
+                # logging.info(f"len of resolved: {len(self._resolved)}")
+                # # Remove from resolved registrations.
+                # self._resolved = [
+                #     (ff, s, c, p)
+                #     for ff, s, c, p in self._resolved
+                #     if not all([ff is f, s is signature, c is condition, p is precedence])]
+                # logging.info(f"len of resolved after: {len(self._resolved)}")
             # Obtain the signature if it is not available.
             if signature is None:
-                signature = extract_signature(f, precedence=precedence)
+                signature = extract_signature(f, condition=condition, precedence=precedence)
             else:
                 # Ensure that the implementation is `f`, but make a copy before
                 # mutating.
@@ -266,7 +309,7 @@ class Function(metaclass=_FunctionMeta):
 
             # Ensure that the implementation has the right name, because this name
             # will show up in the docstring.
-            if getattr(signature.implementation, "__name__", None) != self.__name__:
+            if not to_remove and getattr(signature.implementation, "__name__", None) != self.__name__:
                 signature.implementation = _change_function_name(
                     signature.implementation,
                     self.__name__,
@@ -274,7 +317,8 @@ class Function(metaclass=_FunctionMeta):
 
             # Process default values.
             for subsignature in append_default_args(signature, f):
-                self._resolver.register(subsignature)
+                if not to_remove: self._resolver.register(subsignature)
+                else: self._resolver.unregister(subsignature)
                 registered = True
 
         if registered:
@@ -370,10 +414,12 @@ class Function(metaclass=_FunctionMeta):
 
         # If the resolver is faithful, then we can perform caching using the types of
         # the arguments. If the resolver is not faithful, then we cannot.
-        if self._resolver.is_faithful:
-            self._cache[types] = method, return_type
+        # Marc: I have disabled caching for now, TODO: add back in later
+        #TODO: invalidate the cache if a rule is disabled
+        if self._resolver.is_faithful and signature.condition is None:
+            self._cache[types] = method, return_type, signature
 
-        return method, return_type
+        return method, return_type, signature
 
     def __call__(self, *args, **kw_args):
         # Before attempting to use the cache, resolve any unresolved registrations. Use
@@ -384,11 +430,11 @@ class Function(metaclass=_FunctionMeta):
         # Attempt to use the cache based on the types of the arguments.
         types = tuple(map(type, args))
         try:
-            method, return_type = self._cache[types]
+            method, return_type, loginfo = self._cache[types]
         except KeyError:
             # Cache miss. Run the resolver based on the arguments.
-            method, return_type = self.resolve_method(args, types)
-
+            method, return_type, loginfo = self.resolve_method(args, types)
+        logging.info("%s",loginfo)
         return _convert(method(*args, **kw_args), return_type)
 
     def invoke(self, *types):
@@ -406,11 +452,13 @@ class Function(metaclass=_FunctionMeta):
 
         # Attempt to use the cache based on the types.
         try:
-            method, return_type = self._cache[types]
+            method, return_type, info = self._cache[types]
         except KeyError:
             # Cache miss. Run the resolver based on the types.
             sig_types = Signature(*(resolve_type_hint(t) for t in types))
-            method, return_type = self.resolve_method(sig_types, types)
+            method, return_type, info = self.resolve_method(sig_types, types)
+        
+        logging.info("%s",info)
 
         @wraps(self._f)
         def wrapped_method(*args, **kw_args):

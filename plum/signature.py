@@ -44,16 +44,19 @@ class Signature(Comparable):
         return_type=_default_return_type,
         precedence=_default_precedence,
         implementation=None,
+        condition=None,
     ):
         self.types = types
         self.varargs = varargs
         self.return_type = return_type
         self.precedence = precedence
         self.implementation = implementation
-
+        self.condition = condition
         types_are_faithful = all(is_faithful(t) for t in types)
         varargs_are_faithful = self.varargs is Missing or is_faithful(self.varargs)
-        self.is_faithful = types_are_faithful and varargs_are_faithful
+        self.is_faithful = types_are_faithful and varargs_are_faithful and condition is None
+        #Marc TODO: eventually make condition only perturb is_faithful for given signatures and not full resolver
+
 
     @property
     def has_varargs(self):
@@ -66,6 +69,7 @@ class Signature(Comparable):
             return_type=self.return_type,
             precedence=self.precedence,
             implementation=self.implementation,
+            condition = self.condition,
         )
 
     def __repr__(self):
@@ -81,6 +85,27 @@ class Signature(Comparable):
         if self.implementation:
             parts.append("implementation=" + repr(self.implementation))
         return "Signature(" + ", ".join(parts) + ")"
+
+    def __str__(self):
+        out = ["Dispatched on "]
+        if self.implementation:
+            out.append(f"{self.implementation.__name__}")
+        else:
+            out.append("f")
+        out.append("(")
+        if self.types:
+            out.append(", ".join(map(repr_short, self.types)))
+        if self.varargs != Signature._default_varargs:
+            out.append(", varargs=" + repr_short(self.varargs))
+        out.append(")")
+        if self.return_type != Signature._default_return_type:
+            out.append(f" -> {repr_short(self.return_type)}")
+        if not (self.condition is None):
+            out.append(f" with cond={self.condition.__name__}")
+        if self.precedence != self._default_precedence:
+            out.append(f" with precedence={self.precedence}")
+        return ''.join(out)
+
 
     def __hash__(self):
         return multihash(Signature, *self.types, self.varargs)
@@ -150,7 +175,7 @@ class Signature(Comparable):
             return False
         else:
             types = self.expand_varargs(len(values))
-            return all(_is_bearable(v, t) for v, t in zip(values, types))
+            return all(_is_bearable(v, t) for v, t in zip(values, types)) and (self.condition is None or self.condition(*values))
 
 
 def _inspect_signature(f):
@@ -170,7 +195,7 @@ def _inspect_signature(f):
     return inspect.signature(f)
 
 
-def extract_signature(f, precedence=0):
+def extract_signature(f, condition=None, precedence=0):
     """Extract the signature from a function.
 
     Args:
@@ -234,6 +259,7 @@ def extract_signature(f, precedence=0):
         return_type=return_type,
         precedence=precedence,
         implementation=f,
+        condition=condition,
     )
 
     return signature

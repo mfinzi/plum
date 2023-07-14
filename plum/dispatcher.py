@@ -18,7 +18,7 @@ class Dispatcher:
         self.functions = {}
         self.classes = {}
 
-    def __call__(self, method=None, precedence=0):
+    def __call__(self, method=None, cond=None, precedence=0):
         """Decorator to register for a particular signature.
 
         Args:
@@ -28,11 +28,11 @@ class Dispatcher:
             function: Decorator.
         """
         if method is None:
-            return lambda m: self(m, precedence=precedence)
+            return lambda m: self(method=m, cond=cond, precedence=precedence)
 
         # The signature will be automatically derived from `method`, so we can safely
         # set the signature argument to `None`.
-        return self._add_method(method, None, precedence=precedence)
+        return self._add_method(method, None, condition=cond, precedence=precedence)
 
     def multi(self, *signatures):
         """Decorator to register multiple signatures at once.
@@ -58,6 +58,7 @@ class Dispatcher:
 
         def decorator(method):
             # The precedence will not be used, so we can safely set it to `None`.
+            #Marc TODO: fix with condition later
             return self._add_method(method, *resolved_signatures, precedence=None)
 
         return decorator
@@ -86,10 +87,10 @@ class Dispatcher:
 
         return namespace[name]
 
-    def _add_method(self, method, *signatures, precedence):
+    def _add_method(self, method, *signatures, condition, precedence):
         f = self._get_function(method)
         for signature in signatures:
-            f.register(method, signature, precedence)
+            f.register(method, signature, condition, precedence)
         return f
 
     def clear_cache(self):
