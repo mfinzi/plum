@@ -101,16 +101,20 @@ class Resolver:
         Args:
             signature (:class:`.signature.Signature`): Signature to add.
         """
-        existing = [s == signature for s in self.signatures]
-        if any(existing):
-            if sum(existing) != 1:
-                raise AssertionError(
-                    f"The added signature `{signature}` is equal to {sum(existing)} "
-                    f"existing signatures. This should never happen."
-                )
-            self.signatures[existing.index(True)] = signature
-        else:
-            self.signatures.append(signature)
+        # Marc: made change to remove overwriting of signatures to enable support for multiple with same types
+        # existing = [s == signature for s in self.signatures]
+        # if any(existing):
+        #     print(existing)
+        #     print(signature)
+        #     print("got here")
+        #     if sum(existing) != 1:
+        #         raise AssertionError(
+        #             f"The added signature `{signature}` is equal to {sum(existing)} "
+        #             f"existing signatures. This should never happen."
+        #         )
+        #     self.signatures[existing.index(True)] = signature
+        # else:
+        self.signatures.append(signature)
 
         # Use a double negation for slightly better performance.
         self.is_faithful = not any(not s.is_faithful for s in self.signatures)
@@ -154,8 +158,9 @@ class Resolver:
             def check(s):
                 # `target` is a signature that must be encompassed.
                 return target <= s
-
+        
         candidates = []
+        
         for signature in [s for s in self.signatures if check(s)]:
             # If none of the candidates are comparable, then add the method as
             # a new candidate and continue.
@@ -183,7 +188,7 @@ class Resolver:
         else:
             # There are multiple matching signatures. Before raising an exception,
             # attempt to resolve the ambiguity using the precedence of the signatures.
-            precedences = [c.precedence for c in candidates]
+            precedences = [c.precedence+(.5 if c.condition is not None else 0.) for c in candidates]
             max_precendence = max(precedences)
             if sum([p == max_precendence for p in precedences]) == 1:
                 return candidates[precedences.index(max_precendence)]

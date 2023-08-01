@@ -175,8 +175,8 @@ class Signature(Comparable):
             return False
         else:
             types = self.expand_varargs(len(values))
-            return all(_is_bearable(v, t) for v, t in zip(values, types)) and (self.condition is None or self.condition(*values))
-
+            all_bearable = all(_is_bearable(v, t) for v, t in zip(values, types))
+            return all_bearable and ((self.condition is None) or self.condition(*values))
 
 def _inspect_signature(f):
     """Wrapper of :func:`inspect.signature` which adds support for certain non-function
