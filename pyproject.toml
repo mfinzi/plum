@@ -3,8 +3,8 @@ requires = ["hatchling>=1.8.0", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "plum-dispatch"
-description="Multiple dispatch in Python"
+name = "cola-plum-dispatch"
+description="Multiple dispatch in Python (with additional features for the CoLA library)"
 authors=[
     {name = "Wessel Bruinsma", email="wessel.p.bruinsma@gmail.com"},
 ]
@@ -37,7 +37,7 @@ dev = [
 ]
 
 [project.urls]
-repository = "https://github.com/beartype/plum"
+repository = "https://github.com/mfinzi/plum"
 
 [tool.hatch.build]
 include = ["plum*"]

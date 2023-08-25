@@ -20,7 +20,7 @@ If you notice any issues with the new release, please open an issue.
 Plum requires Python 3.7 or higher.
 
 ```bash
-pip install plum-dispatch
+pip install cola-plum-dispatch
 ```
 
 # [Documentation](https://beartype.github.io/plum)
