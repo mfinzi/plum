@@ -1,4 +1,5 @@
 import abc
+import os
 import textwrap
 import typing
 
@@ -85,6 +86,14 @@ def test_owner():
 
     assert Function(f).owner is None
     assert Function(f, owner="A").owner is A
+
+
+def test_resolve_method_with_cache_no_arguments():
+    def f(x):
+        pass
+
+    with pytest.raises(ValueError, match="`args` and `types` cannot both be `None`"):
+        Function(f)._resolve_method_with_cache()
 
 
 @pytest.fixture()
@@ -211,6 +220,31 @@ def test_doc(monkeypatch):
         x (float): Argument.
     """
     assert g.__doc__ == textwrap.dedent(expected_doc).strip()
+
+
+def test_simple_doc(monkeypatch):
+    @dispatch
+    def f(x: int):
+        """First."""
+
+    @dispatch
+    def f(x: str):
+        """Second."""
+
+    monkeypatch.setitem(os.environ, "PLUM_SIMPLE_DOC", "1")
+    assert f.__doc__ == "First."
+
+    monkeypatch.setitem(os.environ, "PLUM_SIMPLE_DOC", "0")
+    expected_doc = """
+    First.
+
+    -----------
+
+    f(x: str)
+
+    Second.
+    """
+    assert f.__doc__ == textwrap.dedent(expected_doc).strip()
 
 
 def test_methods():

@@ -1,10 +1,12 @@
-from beartype.door import TypeHint
+from typing import Union
+
+import beartype.door
 from beartype.roar import BeartypeDoorNonpepException
 
 from .dispatcher import Dispatcher
 from .function import _owner_transfer
 from .type import resolve_type_hint
-from .util import repr_short
+from .util import TypeHint, repr_short
 
 __all__ = [
     "CovariantMeta",
@@ -99,10 +101,12 @@ class ParametricTypeMeta(type):
             raise RuntimeError("Cannot get the type parameter of non-instantiated parametric type.")
 
 
-def _default_le_type_par(p_left, p_right):
+def _default_le_type_par(
+    p_left: Union[TypeHint, object], p_right: Union[TypeHint, object]
+) -> bool:
     if is_type(p_left) and is_type(p_right):
-        p_left = TypeHint(resolve_type_hint(p_left))
-        p_right = TypeHint(resolve_type_hint(p_right))
+        p_left = beartype.door.TypeHint(resolve_type_hint(p_left))
+        p_right = beartype.door.TypeHint(resolve_type_hint(p_right))
         return p_left <= p_right
     else:
         return p_left == p_right
@@ -218,7 +222,7 @@ def parametric(original_class=None):
                 return original_class.__new__(cls)
 
             cls.__new__ = class_new
-        original_class.__init_subclass__(**kw_args)
+        super(original_class, cls).__init_subclass__(**kw_args)
 
     # Create parametric class.
     parametric_class = meta(
@@ -272,7 +276,7 @@ def is_type(x):
         bool: Whether `x` is a type or a type hint.
     """
     try:
-        TypeHint(x)
+        beartype.door.TypeHint(x)
         return True
     except BeartypeDoorNonpepException:
         return False
@@ -337,13 +341,19 @@ class Val:
         Args:
             val (object): The value to be moved to the type domain.
         """
+        # Do not deprecate until beartype#276 is solved
+        # warnings.warn(
+        #     "`plum.Val` is deprecated and will be removed in a future version. "
+        #     "Please use `typing.Literal` instead.",
+        #     stacklevel=2,
+        # )
         if type(self).concrete:
             if val is not None and type_parameter(self) != val:
                 raise ValueError("The value must be equal to the type parameter.")
         else:
             raise ValueError("The value must be specified.")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return repr_short(type(self)) + "()"
 
     def __eq__(self, other):

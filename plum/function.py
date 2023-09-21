@@ -1,13 +1,15 @@
+import os
 import textwrap
 from functools import wraps
 from types import MethodType
-from typing import Any
+from typing import Any, Callable, List, Optional, Tuple, TypeVar, Union
 
 from .resolver import AmbiguousLookupError, NotFoundLookupError, Resolver
 from .signature import Signature, append_default_args, extract_signature
 from .type import resolve_type_hint
-from .util import repr_short
 import logging
+from .util import TypeHint, repr_short
+
 __all__ = ["Function"]
 
 #TODO: extent to handle conditions (will be necessary)
@@ -25,8 +27,16 @@ class Disable:
 _promised_convert = None
 """function or None: This will be set to :func:`.parametric.convert`."""
 
+# `typing.Self` is available for Python 3.11 and higher.
+try:  # pragma: specific no cover 3.11
+    from typing import Self
+except ImportError:  # pragma: specific no cover 3.8 3.9 3.10
+    Self = TypeVar("Self", bound="Function")
 
-def _convert(obj, target_type):
+SomeExceptionType = TypeVar("SomeExceptionType", bound=Exception)
+
+
+def _convert(obj: Any, target_type: TypeHint) -> Any:
     """Convert an object to a particular type. Only converts if `target_type` is set.
 
     Args:
@@ -42,7 +52,7 @@ def _convert(obj, target_type):
         return _promised_convert(obj, target_type)
 
 
-def _change_function_name(f, name):
+def _change_function_name(f: Callable, name: str) -> Callable:
     """It is not always the case that `f.__name__` is writable. To solve this, first
     create a temporary function that wraps `f` and then change the name.
 
@@ -91,22 +101,22 @@ class Function(metaclass=_FunctionMeta):
 
     _instances = []
 
-    def __init__(self, f, owner=None):
+    def __init__(self, f: Callable, owner: Optional[str] = None) -> None:
         Function._instances.append(self)
 
-        self._f = f
+        self._f: Callable = f
         self._cache = {}
         wraps(f)(self)  # Sets `self._doc`.
 
         # `owner` is the name of the owner. We will later attempt to resolve to
         # which class it actually points.
-        self._owner_name = owner
-        self._owner = None
+        self._owner_name: Optional[str] = owner
+        self._owner: Optional[type] = None
 
         # Initialise pending and resolved methods.
-        self._pending = []
+        self._pending: List[Tuple[Callable, Optional[Signature], int]] = []
         self._resolver = Resolver()
-        self._resolved = []
+        self._resolved: List[Tuple[Callable, Signature, int]] = []
 
     @property
     def owner(self):
@@ -121,7 +131,7 @@ class Function(metaclass=_FunctionMeta):
         return self._owner
 
     @property
-    def __doc__(self):
+    def __doc__(self) -> Optional[str]:
         """str or None: Documentation of the function. This consists of the
         documentation of the function given at initialisation with the documentation
         of all other registered methods appended.
@@ -130,7 +140,7 @@ class Function(metaclass=_FunctionMeta):
         """
         try:
             self._resolve_pending_registrations()
-        except NameError:
+        except NameError:  # pragma: specific no cover 3.7 3.8 3.9
             # When `staticmethod` is combined with
             # `from __future__ import annotations`, in Python 3.10 and higher
             # `staticmethod` will attempt to inherit `__doc__` (see
@@ -143,6 +153,11 @@ class Function(metaclass=_FunctionMeta):
             # partially completed :meth:`Function._resolve_pending_registrations` by
             # clearing the cache.
             self.clear_cache(reregister=False)
+
+        # Don't do any fancy appending of docstrings when the environment variable
+        # `PLUM_SIMPLE_DOC` is set to `1`.
+        if "PLUM_SIMPLE_DOC" in os.environ and os.environ["PLUM_SIMPLE_DOC"] == "1":
+            return self._doc
 
         # Derive the basis of the docstring from `self._f`, removing any indentation.
         doc = self._doc.strip()
@@ -171,12 +186,12 @@ class Function(metaclass=_FunctionMeta):
         return doc if doc else None
 
     @__doc__.setter
-    def __doc__(self, value):
+    def __doc__(self, value: str) -> None:
         # Ensure that `self._doc` remains a string.
         self._doc = value if value else ""
 
     @property
-    def methods(self):
+    def methods(self) -> List[Signature]:
         """list[:class:`.signature.Signature`]: All available methods."""
         self._resolve_pending_registrations()
         return self._resolver.signatures
@@ -190,7 +205,7 @@ class Function(metaclass=_FunctionMeta):
         return Disable(self,signatures)
 
 
-    def dispatch(self, method=None, cond=None, precedence=0):
+    def dispatch(self, method=None, cond=None, precedence=0) -> Union[Self, Callable[[Callable], Self]]:
         """Decorator to extend the function with another signature.
 
         Args:
@@ -205,7 +220,9 @@ class Function(metaclass=_FunctionMeta):
         self.register(method, condition=cond, precedence=precedence)
         return self
 
-    def dispatch_multi(self, *signatures):
+    def dispatch_multi(
+        self: Self, *signatures: Union[Signature, Tuple[TypeHint, ...]]
+    ) -> Callable[[Callable], Self]:
         """Decorator to extend the function with multiple signatures at once.
 
         Args:
@@ -283,7 +300,7 @@ class Function(metaclass=_FunctionMeta):
         """
         self._pending.append((f, signature, condition, precedence, to_remove))
 
-    def _resolve_pending_registrations(self):
+    def _resolve_pending_registrations(self) -> None:
         # Keep track of whether anything registered.
         registered = False
 
@@ -327,7 +344,7 @@ class Function(metaclass=_FunctionMeta):
             # Clear cache.
             self.clear_cache(reregister=False)
 
-    def _enhance_exception(self, e):
+    def _enhance_exception(self, e: SomeExceptionType) -> SomeExceptionType:
         """Enchance an exception by prepending a prefix to the message of the exception
         which specifies that the message is for this function.
 
@@ -346,12 +363,13 @@ class Function(metaclass=_FunctionMeta):
         message = str(e)
         return type(e)(prefix + message[0].lower() + message[1:])
 
-    def resolve_method(self, target, types):
+    def resolve_method(
+        self, target: Union[Tuple[object, ...], Signature]
+    ) -> Tuple[Callable, TypeHint]:
         """Find the method and return type for arguments.
 
         Args:
             target (object): Target.
-            types (tuple[type, ...]): Types of the arguments.
 
         Returns:
             function: Method.
@@ -370,74 +388,99 @@ class Function(metaclass=_FunctionMeta):
 
         except NotFoundLookupError as e:
             e = self._enhance_exception(e)  # Specify this function.
-
-            if not self.owner:
-                # Not in a class. Nothing we can do.
-                raise e
-            else:
-                # In a class. Walk through the classes in the class's MRO, except for
-                # this class, and try to get the method.
-                method = None
-                return_type = object
-
-                for c in self.owner.__mro__[1:]:
-                    # Skip the top of the type hierarchy given by `object` and `type`.
-                    # We do not suddenly want to fall back to any unexpected default
-                    # behaviour.
-                    if c in {object, type}:
-                        continue
-
-                    # We need to check `c.__dict__` here instead of using `hasattr`
-                    # since e.g. `c.__le__` will return  even if `c` does not implement
-                    # `__le__`!
-                    if self._f.__name__ in c.__dict__:
-                        method = getattr(c, self._f.__name__)
-                    else:
-                        # For some reason, coverage fails to catch the `continue`
-                        # below. Add the do-nothing `_ = None` fixes this.
-                        # TODO: Remove this once coverage properly catches this.
-                        _ = None
-                        continue
-
-                    # Ignore abstract methods.
-                    if getattr(method, "__isabstractmethod__", False):
-                        method = None
-                        continue
-
-                    # We found a good candidate. Break.
-                    break
-
-                if not method:
-                    # If no method has been found after walking through the MRO, raise
-                    # the original exception.
-                    raise e
-
+            method, return_type = self._handle_not_found_lookup_error(e)
+        
         # If the resolver is faithful, then we can perform caching using the types of
         # the arguments. If the resolver is not faithful, then we cannot.
         # Marc: I have disabled caching for now, TODO: add back in later
         #TODO: invalidate the cache if a rule is disabled
         if self._resolver.is_faithful and signature.condition is None:
             self._cache[types] = method, return_type, signature
-
         return method, return_type, signature
 
+    def _handle_not_found_lookup_error(
+        self, ex: NotFoundLookupError
+    ) -> Tuple[Callable, TypeHint]:
+        if not self.owner:
+            # Not in a class. Nothing we can do.
+            raise ex
+
+        # In a class. Walk through the classes in the class's MRO, except for this
+        # class, and try to get the method.
+        method = None
+        return_type = object
+
+        for c in self.owner.__mro__[1:]:
+            # Skip the top of the type hierarchy given by `object` and `type`. We do
+            # not suddenly want to fall back to any unexpected default behaviour.
+            if c in {object, type}:
+                continue
+
+            # We need to check `c.__dict__` here instead of using `hasattr` since e.g.
+            # `c.__le__` will return  even if `c` does not implement `__le__`!
+            if self._f.__name__ in c.__dict__:
+                method = getattr(c, self._f.__name__)
+            else:
+                # For some reason, coverage fails to catch the `continue` below. Add
+                # the do-nothing `_ = None` fixes this.
+                # TODO: Remove this once coverage properly catches this.
+                _ = None
+                continue
+
+            # Ignore abstract methods.
+            if getattr(method, "__isabstractmethod__", False):
+                method = None
+                continue
+
+            # We found a good candidate. Break.
+            break
+
+        if not method:
+            # If no method has been found after walking through the MRO, raise the
+            # original exception.
+            raise ex
+        return method, return_type
+
     def __call__(self, *args, **kw_args):
+        method, return_type = self._resolve_method_with_cache(args=args)
+        return _convert(method(*args, **kw_args), return_type)
+
+    def _resolve_method_with_cache(
+        self,
+        args: Union[Tuple[object, ...], Signature, None] = None,
+        types: Optional[Tuple[TypeHint, ...]] = None,
+    ) -> Tuple[Callable, TypeHint]:
+        if args is None and types is None:
+            raise ValueError(
+                "Arguments `args` and `types` cannot both be `None`. "
+                "This should never happen!"
+            )
+
         # Before attempting to use the cache, resolve any unresolved registrations. Use
         # an `if`-statement to speed up the common case.
         if self._pending:
             self._resolve_pending_registrations()
 
-        # Attempt to use the cache based on the types of the arguments.
-        types = tuple(map(type, args))
+        if types is None:
+            # Attempt to use the cache based on the types of the arguments.
+            types = tuple(map(type, args))
         try:
-            method, return_type, loginfo = self._cache[types]
+            return self._cache[types]
         except KeyError:
-            # Cache miss. Run the resolver based on the arguments.
-            method, return_type, loginfo = self.resolve_method(args, types)
-        logging.info("%s",loginfo)
-        return _convert(method(*args, **kw_args), return_type)
+            if args is None:
+                args = Signature(*(resolve_type_hint(t) for t in types))
 
-    def invoke(self, *types):
+            # Cache miss. Run the resolver based on the arguments.
+            method, return_type, loginfo = self.resolve_method(args)
+            # If the resolver is faithful, then we can perform caching using the types
+            # of the arguments. If the resolver is not faithful, then we cannot.
+            if self._resolver.is_faithful:
+                self._cache[types] = method, return_type, loginfo
+
+            logging.info("%s", loginfo) #TODO Marc: in context manager
+            return method, return_type
+
+    def invoke(self, *types: TypeHint) -> Callable:
         """Invoke a particular method.
 
         Args:
@@ -446,19 +489,7 @@ class Function(metaclass=_FunctionMeta):
         Returns:
             function: Method.
         """
-        # Need this before cache
-        if len(self._pending) > 0:
-            self._resolve_pending_registrations()
-
-        # Attempt to use the cache based on the types.
-        try:
-            method, return_type, info = self._cache[types]
-        except KeyError:
-            # Cache miss. Run the resolver based on the types.
-            sig_types = Signature(*(resolve_type_hint(t) for t in types))
-            method, return_type, info = self.resolve_method(sig_types, types)
-        
-        logging.info("%s",info)
+        method, return_type = self._resolve_method_with_cache(types=types)
 
         @wraps(self._f)
         def wrapped_method(*args, **kw_args):
@@ -472,7 +503,7 @@ class Function(metaclass=_FunctionMeta):
         else:
             return self
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<function {self._f} with {len(self._resolver)} registered and"
             f" {len(self._pending)} pending method(s)>"
