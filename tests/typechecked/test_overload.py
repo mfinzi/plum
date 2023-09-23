@@ -6,12 +6,12 @@ dispatch = Dispatcher()
 
 
 @overload
-def f(x: int) -> int:  # E: pyright(marked as overload)
+def f(x: int) -> int:  # E: pyright(includes an implementation)
     return x
 
 
 @overload
-def f(x: str) -> str:  # E: pyright(marked as overload)
+def f(x: str) -> str:  # E: pyright(includes an implementation)
     return x
 
 
