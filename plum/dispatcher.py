@@ -23,7 +23,7 @@ class Dispatcher:
         self.functions: Dict[str, Function] = {}
         self.classes: Dict[str, Dict[str, Function]] = {}
 
-    def __call__(self, method: Optional[T] = None, precedence: int = 0) -> T:
+    def __call__(self, method: Optional[T] = None, cond:Optional[Callable]=None, precedence: int = 0) -> T:
         """Decorator to register for a particular signature.
 
         Args:
@@ -41,7 +41,7 @@ class Dispatcher:
         if overloads:
             for overload_method in overloads:
                 # All `f` returned by `self._add_method` are the same.
-                f = self._add_method(overload_method, None, precedence=precedence)
+                f = self._add_method(overload_method, None, condition=cond, precedence=precedence)
             # We do not need to register `method`, because it is not an implementation.
             return f
 

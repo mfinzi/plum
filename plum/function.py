@@ -394,8 +394,6 @@ class Function(metaclass=_FunctionMeta):
         # the arguments. If the resolver is not faithful, then we cannot.
         # Marc: I have disabled caching for now, TODO: add back in later
         #TODO: invalidate the cache if a rule is disabled
-        if self._resolver.is_faithful and signature.condition is None:
-            self._cache[types] = method, return_type, signature
         return method, return_type, signature
 
     def _handle_not_found_lookup_error(
@@ -465,19 +463,19 @@ class Function(metaclass=_FunctionMeta):
             # Attempt to use the cache based on the types of the arguments.
             types = tuple(map(type, args))
         try:
-            return self._cache[types]
+            return self._cache[types][:2]
         except KeyError:
             if args is None:
                 args = Signature(*(resolve_type_hint(t) for t in types))
 
             # Cache miss. Run the resolver based on the arguments.
-            method, return_type, loginfo = self.resolve_method(args)
+            method, return_type, signature = self.resolve_method(args)
             # If the resolver is faithful, then we can perform caching using the types
             # of the arguments. If the resolver is not faithful, then we cannot.
-            if self._resolver.is_faithful:
-                self._cache[types] = method, return_type, loginfo
+            if self._resolver.is_faithful and signature.condition is None:
+                self._cache[types] = method, return_type, signature
 
-            logging.info("%s", loginfo) #TODO Marc: in context manager
+            logging.info("%s", signature) #TODO Marc: in context manager
             return method, return_type
 
     def invoke(self, *types: TypeHint) -> Callable:
