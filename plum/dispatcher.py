@@ -9,7 +9,9 @@ __all__ = ["Dispatcher", "dispatch", "clear_all_cache"]
 
 T = TypeVar("T", bound=Callable[..., Any])
 
+import inspect
 
+from functools import wraps
 class Dispatcher:
     """A namespace for functions.
 
@@ -81,7 +83,16 @@ class Dispatcher:
     def abstract(self, method: Callable) -> Function:
         """Decorator for an abstract function definition. The abstract function
         definition does not implement any methods."""
-        return self._get_function(method)
+        fn = self._get_function(method)
+        sig = inspect.signature(method)
+        @wraps(fn)
+        def new_fn(*args, **kwargs):
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            new_args = list(bound.arguments.values())
+            return fn(*new_args)
+        self._abstract = new_fn
+        return new_fn
 
     def _get_function(self, method: Callable) -> Function:
         # If a class is the owner, use a namespace specific for that class. Otherwise,
@@ -106,7 +117,10 @@ class Dispatcher:
         f = self._get_function(method)
         for signature in signatures:
             f.register(method, signature, condition, precedence)
-        return f
+        if hasattr(self, "_abstract"):
+            return self._abstract
+        else:
+            return f
 
     def clear_cache(self):
         """Clear cache."""
