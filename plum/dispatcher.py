@@ -91,7 +91,7 @@ class Dispatcher:
             bound.apply_defaults()
             new_args = list(bound.arguments.values())
             return fn(*new_args)
-        self._abstract = new_fn
+        fn._abstract = new_fn
         return new_fn
 
     def _get_function(self, method: Callable) -> Function:
@@ -117,8 +117,8 @@ class Dispatcher:
         f = self._get_function(method)
         for signature in signatures:
             f.register(method, signature, condition, precedence)
-        if hasattr(self, "_abstract"):
-            return self._abstract
+        if hasattr(f, "_abstract"):
+            return f._abstract
         else:
             return f
 

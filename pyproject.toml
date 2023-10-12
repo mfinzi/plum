@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cola-plum-dispatch"
+version = "0.1.4"
 description="Multiple dispatch in Python (with additional features for the CoLA library)"
 authors=[
     {name = "Wessel Bruinsma", email="wessel.p.bruinsma@gmail.com"},
@@ -15,7 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Development Status :: 5 - Production/Stable",
 ]
-dynamic = ["version"]
 
 requires-python = ">=3.8"
 dependencies = [
